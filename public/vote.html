@@ -1,0 +1,77 @@
+<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>iTV - Bình chọn bài hát</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#22091a;color:#fff}
+header{position:sticky;top:0;z-index:5;background:linear-gradient(#b3195c,#8e1352);padding:12px 14px;font-weight:bold;font-size:18px;box-shadow:0 2px 8px #0008}
+header span{color:#ffc107}
+main{max-width:620px;margin:auto;padding:12px}
+.card{background:#3a1030;border-radius:12px;padding:12px;margin-bottom:14px}
+h2{font-size:16px;margin:0 0 10px;color:#ffc107}
+input,textarea{width:100%;padding:10px;border-radius:8px;border:0;font:16px Arial;margin-bottom:8px;background:#fff;color:#111}
+textarea{height:64px;resize:none}
+button{background:#ffc107;border:0;border-radius:8px;padding:9px 14px;font-weight:bold;cursor:pointer;color:#222}
+button:active{transform:scale(.96)}
+#icons{display:flex;flex-wrap:wrap;gap:8px}#icons button{font-size:26px;padding:6px 12px;background:#5a1a48}
+small{opacity:.7;display:block;margin-top:6px}
+#msg{position:sticky;top:48px;z-index:4;min-height:0}
+#msg div{background:#c8d63a;color:#222;font-weight:bold;padding:8px 12px;border-radius:8px;margin-bottom:10px}
+.row{display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #5a1a48}
+.rk{font-weight:bold;color:#ffb300;text-align:center}.nm b{color:#ffb300}
+.bar{height:5px;background:#5a1a48;border-radius:3px;margin-top:5px}.bar i{display:block;height:100%;background:linear-gradient(#ff6a55,#e8321f);border-radius:3px}
+.vt{font-size:12px;opacity:.8;text-align:center;margin-bottom:3px}
+.stk{display:flex;flex-wrap:wrap;gap:8px}.stk button{padding:4px;background:#5a1a48;border-radius:8px}.stk img{width:48px;height:48px;object-fit:contain;display:block}
+details input{margin-top:6px}
+.cm{padding:7px 0;border-bottom:1px solid #5a1a48;font-size:15px;word-break:break-word}.cm b{color:#c8d63a}
+</style></head><body>
+<header>🎵 <span>iTV</span> · Bình chọn bài hát</header>
+<main>
+<div id="nowbox"></div>
+<div id="msg"></div>
+<section class="card"><h2>Bạn là ai?</h2><input id="nick" maxlength="14" placeholder="Tên hiển thị (vd: HN 88)">
+<div id="icons"></div><small>Bấm vào một icon để thả lên màn hình trực tiếp</small></section>
+<section class="card"><h2>Sticker &amp; emote</h2><div id="stk" class="stk"></div><small id="stk0">Chưa có sticker nào, hãy thêm sticker đầu tiên!</small>
+<details style="margin-top:8px"><summary style="cursor:pointer;color:#ffc107;font-weight:bold">➕ Thêm sticker / emote của bạn</summary>
+<input id="sname" maxlength="20" placeholder="Tên sticker"><input type="file" id="sfile" accept="image/*"><input id="surl" placeholder="hoặc dán link ảnh (https://...)">
+<div id="sprev" style="margin:6px 0"></div><button onclick="sendStk()">Gửi sticker</button>
+<small>Có thể bấm Ctrl+V để dán ảnh. Ảnh được thu nhỏ tự động và cần admin duyệt trước khi dùng.</small></details></section>
+<section class="card"><h2>Bình chọn bài hát</h2><input id="q" placeholder="🔍 Tìm theo tên bài hoặc mã..."><div id="list"></div></section>
+<section class="card"><h2>Bình luận</h2><textarea id="ct" maxlength="120" placeholder="Viết bình luận..."></textarea><button onclick="comment()">Gửi bình luận</button><div id="feed" style="margin-top:8px"></div></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);let songs=[],comments=[];
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+$('nick').value=localStorage.nick||'';$('nick').oninput=()=>localStorage.nick=$('nick').value;
+$('icons').innerHTML=[['mouse','🐭'],['like','👍'],['love','❤️'],['care','🥰'],['haha','😆'],['wow','😮'],['sad','😢'],['angry','😡']].map(i=>`<button data-k="${i[0]}">${i[1]}</button>`).join('');
+$('icons').onclick=e=>{const k=e.target.dataset.k;if(k)post('/api/icon',{name:$('nick').value,kind:k},()=>'✅ Icon đã lên màn hình!')};
+function drawSongs(){const all=[...songs].sort((a,b)=>b.votes-a.votes),max=all[0]?all[0].votes:0,q=$('q').value.toLowerCase().trim();
+ $('list').innerHTML=all.map((s,i)=>({s,r:i+1})).filter(x=>!q||x.s.name.toLowerCase().includes(q)||x.s.code.includes(q)).slice(0,80)
+ .map(({s,r})=>`<div class="row"><div class="rk">${r}</div><div class="nm"><b>${esc(s.code)}:</b> ${esc(s.name)}<div class="bar"><i style="width:${max?Math.max(3,s.votes/max*100):3}%"></i></div></div><div><div class="vt">${s.votes} lượt</div><button data-c="${esc(s.code)}">Chọn</button></div></div>`).join('')||'<small>Không tìm thấy bài nào</small>';}
+$('q').oninput=drawSongs;
+$('list').onclick=e=>{const c=e.target.dataset.c;if(c)post('/api/vote',{code:c,name:$('nick').value},r=>`✅ Đã chọn: ${r.name}`)};
+function drawNow(n){$('nowbox').innerHTML=n?`<div class="card">▶ Đang phát: <b>${esc(n.code)}: ${esc(n.name)}</b>${n.artist?' — '+esc(n.artist):''}</div>`:''}
+function drawFeed(){$('feed').innerHTML=[...comments].reverse().slice(0,50).map(c=>`<div class="cm"><b>${esc(c.name)}:</b> ${esc(c.text)}</div>`).join('')||'<small>Chưa có bình luận nào, hãy là người đầu tiên!</small>'}
+function comment(){const t=$('ct').value;post('/api/comment',{name:$('nick').value,text:t},()=>{$('ct').value='';return '✅ Đã gửi bình luận'})}
+let stickers=[],pend=null;
+function drawStk(){$('stk').innerHTML=stickers.map(s=>`<button data-s="${esc(s.id)}" title="${esc(s.name)}"><img src="/sticker/${encodeURIComponent(s.id)}"></button>`).join('');$('stk0').style.display=stickers.length?'none':'block'}
+$('stk').onclick=e=>{const b=e.target.closest('button');if(b)post('/api/icon',{name:$('nick').value,kind:'sticker',sticker:b.dataset.s},()=>'✅ Sticker đã lên màn hình!')};
+function toData(img){let w=img.naturalWidth,h=img.naturalHeight;const sc=Math.min(1,256/Math.max(w,h));w=Math.max(1,Math.round(w*sc));h=Math.max(1,Math.round(h*sc));
+ const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);
+ for(const q of [.9,.7,.5]){const d=c.toDataURL('image/webp',q);if(d.length<300000)return d}const p=c.toDataURL('image/png');return p.length<300000?p:null}
+function loadImg(src,cors){return new Promise((ok,no)=>{const i=new Image();if(cors)i.crossOrigin='anonymous';
+ i.onload=()=>{try{pend=toData(i);if(!pend)throw 0;$('sprev').innerHTML='<img src="'+pend+'" style="width:64px;height:64px;object-fit:contain;background:#fff3;border-radius:8px">';ok()}catch(e){pend=null;no()}};i.onerror=no;i.src=src})}
+$('sfile').onchange=e=>{const f=e.target.files[0];if(f)loadImg(URL.createObjectURL(f)).catch(()=>msg('⚠️ Không đọc được ảnh'))};
+$('surl').onchange=()=>{const u=$('surl').value.trim();if(u)loadImg(u,true).catch(()=>msg('⚠️ Trang chứa ảnh không cho tải trực tiếp. Hãy lưu ảnh về máy rồi chọn file.'))};
+document.addEventListener('paste',e=>{const it=[...((e.clipboardData||{}).items||[])].find(x=>x.type.startsWith('image/'));if(it)loadImg(URL.createObjectURL(it.getAsFile())).catch(()=>msg('⚠️ Không đọc được ảnh'))});
+function sendStk(){if(!pend)return msg('⚠️ Chưa chọn ảnh');post('/api/sticker/submit',{name:$('sname').value,by:$('nick').value,data:pend},r=>{pend=null;$('sprev').innerHTML='';$('sname').value=$('surl').value=$('sfile').value='';return r.approved?'✅ Sticker đã được thêm!':'✅ Đã gửi sticker, chờ admin duyệt'})}
+function msg(t){$('msg').innerHTML=`<div>${esc(t)}</div>`;clearTimeout(tm);tm=setTimeout(()=>$('msg').innerHTML='',3500)}
+let tm;function post(u,b,ok){fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>r.json())
+ .then(r=>{$('msg').innerHTML=`<div>${r.ok?ok(r):'⚠️ '+esc(r.error)}</div>`;clearTimeout(tm);tm=setTimeout(()=>$('msg').innerHTML='',3500)})
+ .catch(()=>$('msg').innerHTML='<div>⚠️ Mất kết nối server</div>')}
+const es=new EventSource('/api/events');
+es.onmessage=e=>{const d=JSON.parse(e.data);
+ if(d.type==='state'){songs=d.songs;comments=d.comments||[];drawSongs();drawFeed();drawNow(d.now);stickers=d.stickers||[];drawStk()}
+ else if(d.type==='stickers'){stickers=d.stickers||[];drawStk()}
+ else if(d.type==='now')drawNow(d.now)
+ else if(d.type==='songs'){songs=d.songs;drawSongs()}
+ else if(d.type==='comment'){comments.push(d.c);if(comments.length>100)comments.shift();drawFeed()}
+ else if(d.type==='commentdel'){comments=comments.filter(c=>c.id!==d.id);drawFeed()}};
+</script></body></html>
