@@ -21,6 +21,17 @@ setInterval(()=>{const n=Date.now();for(const[k,v]of last)if(n-v>60000)last.dele
 const json=(res,code,o)=>{res.writeHead(code,{'Content-Type':'application/json'});res.end(JSON.stringify(o))};
 const body=(req,max=20000)=>new Promise(r=>{let b='';req.on('data',c=>{b+=c;if(b.length>max)req.destroy()});req.on('end',()=>{try{r(JSON.parse(b||'{}'))}catch(e){r({})}});req.on('error',()=>r({}));req.on('close',()=>r({}))});
 const MIMES={png:'image/png',jpg:'image/jpeg',webp:'image/webp',gif:'image/gif'};
+function imgDims(b,t){try{
+ if(t==='png')return[b.readUInt32BE(16),b.readUInt32BE(20)];
+ if(t==='gif')return[b.readUInt16LE(6),b.readUInt16LE(8)];
+ if(t==='webp'){const k=b.toString('latin1',12,16);
+  if(k==='VP8X')return[1+(b[24]|b[25]<<8|b[26]<<16),1+(b[27]|b[28]<<8|b[29]<<16)];
+  if(k==='VP8 ')return[(b[26]|b[27]<<8)&0x3fff,(b[28]|b[29]<<8)&0x3fff];
+  if(k==='VP8L')return[1+(((b[22]&0x3f)<<8)|b[21]),1+(((b[24]&0xf)<<10)|(b[23]<<2)|((b[22]&0xc0)>>6))]}
+ if(t==='jpeg'){let o=2;while(o<b.length-9){if(b[o]!==0xFF){o++;continue}const m=b[o+1];
+  if(m>=0xC0&&m<=0xCF&&m!==0xC4&&m!==0xC8&&m!==0xCC)return[b[o+7]<<8|b[o+8],b[o+5]<<8|b[o+6]];
+  if(m===0xD8||m===0x01||(m>=0xD0&&m<=0xD7)){o+=2;continue}o+=2+(b[o+2]<<8|b[o+3])}}
+ }catch(e){}return null}
 function isImg(b,t){if(t==='png')return b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47;if(t==='jpeg')return b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF;if(t==='gif')return b.toString('latin1',0,4)==='GIF8';return b.toString('latin1',0,4)==='RIFF'&&b.toString('latin1',8,12)==='WEBP'}
 const clean=(x,n)=>String(x||'').replace(/[<>]/g,'').replace(/\s+/g,' ').trim().slice(0,n);
 const okKey=req=>KEY&&req.headers['x-key']===KEY;
@@ -58,7 +69,8 @@ const handler=async(req,res)=>{
   const m=/^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+\/=]+)$/.exec(String(b.data||''));if(!m)return json(res,400,{error:'Ảnh không hợp lệ (png/jpg/webp/gif)'});
   const buf=Buffer.from(m[2],'base64');if(buf.length>250000||buf.length<30||!isImg(buf,m[1]))return json(res,400,{error:'Ảnh không hợp lệ hoặc quá lớn (tối đa 250KB)'});
   const w=limited('s',ip,30000);if(w)return json(res,429,{error:`Đợi ${w}s rồi gửi sticker tiếp`});
-  enqueue({type:'stickerSubmit',name:clean(b.name,20)||'sticker',by:clean(b.by,14)||'Khách',data:b.data});return json(res,200,{ok:true})
+  const id=Date.now().toString(36)+Math.random().toString(36).slice(2,5);if(b.sq){const d=imgDims(buf,m[1]);if(!d||d[0]!==d[1]||d[0]<16)return json(res,400,{error:'Ảnh phải vuông tỉ lệ 1:1'})}
+  enqueue({type:'stickerSubmit',name:clean(b.name,20)||'sticker',by:clean(b.by,14)||'Khách',data:b.data,sid:id,sq:!!b.sq});return json(res,200,{ok:true,id,approved:false})
  }
  if(url==='/api/icon'){
   const w=limited('i',ip,ICON_CD);if(w)return json(res,429,{error:`Đợi ${w}s rồi gửi icon tiếp`});
@@ -67,9 +79,9 @@ const handler=async(req,res)=>{
   enqueue({type:'icon',name:clean(b.name,14)||'Khách',kind});return json(res,200,{ok:true});
  }
  if(url==='/api/comment'){
-  const text=clean(b.text,120);if(!text)return json(res,400,{error:'Chưa nhập nội dung'});
+  const text=clean(b.text,120);const stk=/^[a-z0-9]{4,16}$/.test(String(b.stk||'').trim())?String(b.stk).trim():'';if(!text&&!stk)return json(res,400,{error:'Chưa nhập nội dung'});
   const w=limited('c',ip,COMMENT_CD);if(w)return json(res,429,{error:`Đợi ${w}s rồi bình luận tiếp`});
-  const c={id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:clean(b.name,14)||'Khách',text,t:Date.now()};
+  const c={id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:clean(b.name,14)||'Khách',text,t:Date.now()};if(stk)c.stk=stk;
   comments.push(c);if(comments.length>100)comments.shift();enqueue({type:'comment',c});send({type:'comment',c});return json(res,200,{ok:true});
  }
  json(res,404,{error:'not found'});
