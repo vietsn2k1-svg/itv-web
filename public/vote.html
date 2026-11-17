@@ -21,7 +21,7 @@ small{opacity:.7;display:block;margin-top:6px}
 .stk{display:flex;flex-wrap:wrap;gap:8px}.stk button{padding:4px;background:#5a1a48;border-radius:8px}.stk img{width:48px;height:48px;object-fit:contain;display:block}
 details input{margin-top:6px}
 .cm{padding:7px 0;border-bottom:1px solid #5a1a48;font-size:15px;word-break:break-word}.cm b{color:#c8d63a}
-.emr{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}.emr button{padding:4px 8px;font-size:20px;background:#5a1a48}.cat{display:flex;align-items:center;gap:10px}.cat img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:2px solid #ffc107}.cmi{width:56px;height:56px;object-fit:cover;border-radius:8px;vertical-align:middle;margin-left:8px}
+.emr{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}.emr button{padding:4px 8px;font-size:20px;background:#5a1a48}.cat{display:flex;flex-wrap:wrap;gap:10px}.cat .ci{position:relative}.cat img{height:64px;width:auto;max-width:140px;object-fit:contain;border-radius:8px;border:2px solid #ffc107;background:#0003;display:block}.cat b{position:absolute;top:-7px;right:-7px;background:#ffc107;color:#222;border-radius:50%;width:20px;height:20px;text-align:center;font-size:12px;line-height:20px;cursor:pointer}.cmi{height:56px;width:auto;max-width:100%;object-fit:contain;border-radius:8px;vertical-align:middle;margin:4px 6px 0 0}
 </style></head><body>
 <header>🎵 <span>iTV</span> · Bình chọn bài hát</header>
 <main>
@@ -37,10 +37,10 @@ details input{margin-top:6px}
 <section class="card"><h2>Bình chọn bài hát</h2><input id="q" placeholder="🔍 Tìm theo tên bài hoặc mã..."><div id="list"></div></section>
 <section class="card"><h2>Bình luận</h2><textarea id="ct" maxlength="120" placeholder="Viết bình luận..."></textarea>
 <div id="emr" class="emr"></div><div id="cat" style="margin:6px 0"></div>
-<details style="margin:6px 0"><summary style="cursor:pointer;color:#ffc107;font-weight:bold">📎 Gắn ảnh / GIF / sticker vào bình luận (vuông 1:1)</summary>
+<details style="margin:6px 0"><summary style="cursor:pointer;color:#ffc107;font-weight:bold">📎 Gắn ảnh / GIF / sticker vào bình luận (tối đa 4)</summary>
 <div id="cpool" class="stk" style="margin-top:8px"></div>
-<div style="margin:8px 0">Hoặc thêm của bạn: <input type="file" id="cfile" accept="image/*"></div>
-<small>Ảnh thường được tự cắt vuông 1:1. GIF phải vuông sẵn (ví dụ 256×256). Tối đa 250KB. Ảnh của bạn cần admin duyệt mới hiện lên sóng.</small></details>
+<div style="margin:8px 0">Hoặc thêm của bạn: <input type="file" id="cfile" accept="image/*" multiple></div>
+<small>Chọn nhiều ảnh cùng lúc (tối đa 4). Giữ nguyên tỉ lệ ảnh, không cần vuông. Mỗi ảnh/GIF tối đa 250KB (ảnh lớn sẽ tự thu nhỏ). Ảnh của bạn cần admin duyệt mới hiện lên sóng.</small></details>
 <button onclick="comment()">Gửi bình luận</button>
 <div id="feed" style="margin-top:8px"></div></section>
 </main>
@@ -56,29 +56,38 @@ function drawSongs(){const all=[...songs].sort((a,b)=>b.votes-a.votes),max=all[0
 $('q').oninput=drawSongs;
 $('list').onclick=e=>{const c=e.target.dataset.c;if(c)post('/api/vote',{code:c,name:$('nick').value},r=>`✅ Đã chọn: ${r.name}`)};
 function drawNow(n){$('nowbox').innerHTML=n?`<div class="card">▶ Đang phát: <b>${esc(n.code)}: ${esc(n.name)}</b>${n.artist?' — '+esc(n.artist):''}</div>`:''}
-function drawFeed(){$('feed').innerHTML=[...comments].reverse().slice(0,50).map(c=>`<div class="cm"><b>${esc(c.name)}:</b> ${esc(c.text)}${c.stk?`<img class="cmi" src="/sticker/${encodeURIComponent(c.stk)}" onerror="this.remove()">`:''}</div>`).join('')||'<small>Chưa có bình luận nào, hãy là người đầu tiên!</small>'}
+function attHtml(c){const ids=c.stks||(c.stk?[c.stk]:[]);return ids.length?'<br>'+ids.map(i=>'<img class="cmi" src="/sticker/'+encodeURIComponent(i)+'" onerror="this.remove()">').join(''):''}
+function drawFeed(){$('feed').innerHTML=[...comments].reverse().slice(0,50).map(c=>`<div class="cm"><b>${esc(c.name)}:</b> ${esc(c.text)}${attHtml(c)}</div>`).join('')||'<small>Chưa có bình luận nào, hãy là người đầu tiên!</small>'}
 const EMO=['😀','😂','😍','🥰','👍','❤️','🔥','🎵','😮','😢','😡','🎉'];
 $('emr').innerHTML=EMO.map(e=>'<button type="button" data-e="'+e+'">'+e+'</button>').join('');
 $('emr').onclick=e=>{const b=e.target.closest('button');if(!b)return;const t=$('ct');t.value=(t.value+b.dataset.e).slice(0,120);t.focus()};
-let att=null;
-function drawAtt(){$('cat').innerHTML=att?'<div class="cat"><img src="'+(att.id?'/sticker/'+encodeURIComponent(att.id):att.data)+'" alt=""><button type="button" onclick="att=null;drawAtt()">✕ Bỏ ảnh</button></div>':''}
+let atts=[];const MAXATT=4;
+const attSrc=a=>a.id?'/sticker/'+encodeURIComponent(a.id):a.data;
+function drawAtt(){$('cat').innerHTML=atts.length?'<div class="cat">'+atts.map((a,i)=>'<span class="ci"><img src="'+attSrc(a)+'" alt=""><b data-x="'+i+'">✕</b></span>').join('')+'</div>':''}
+$('cat').onclick=e=>{const b=e.target.closest('[data-x]');if(b){atts.splice(+b.dataset.x,1);drawAtt()}};
+function addAtt(a){if(atts.length>=MAXATT)return msg('⚠️ Tối đa '+MAXATT+' ảnh trong một bình luận');atts.push(a);drawAtt()}
 function drawCpool(){$('cpool').innerHTML=stickers.map(s=>'<button type="button" data-c="'+esc(s.id)+'"><img src="/sticker/'+encodeURIComponent(s.id)+'"></button>').join('')||'<small>Chưa có sticker trong kho</small>'}
-$('cpool').onclick=e=>{const b=e.target.closest('button');if(b){att={id:b.dataset.c};drawAtt()}};
-$('cfile').onchange=e=>{const f=e.target.files[0];e.target.value='';if(!f)return;const rd=new FileReader();
- rd.onload=()=>{const im=new Image();
-  im.onload=()=>{
-   if(f.type==='image/gif'){if(im.naturalWidth!==im.naturalHeight)return msg('⚠️ GIF phải vuông tỉ lệ 1:1 (ví dụ 256×256). Hãy cắt GIF thành hình vuông rồi thử lại.');
-    if(rd.result.length>330000)return msg('⚠️ GIF quá lớn (tối đa 250KB)');att={data:rd.result,sq:true};drawAtt();return}
-   const s=Math.min(im.naturalWidth,im.naturalHeight),c=document.createElement('canvas');c.width=c.height=Math.min(256,s);
-   c.getContext('2d').drawImage(im,(im.naturalWidth-s)/2,(im.naturalHeight-s)/2,s,s,0,0,c.width,c.height);
-   let d=c.toDataURL('image/png');if(d.length>330000)d=c.toDataURL('image/webp',0.85);
-   if(d.length>330000)return msg('⚠️ Ảnh quá lớn, hãy chọn ảnh nhỏ hơn');att={data:d,sq:true};drawAtt()};
-  im.onerror=()=>msg('⚠️ Không đọc được ảnh');im.src=rd.result};rd.readAsDataURL(f)};
-async function comment(){const t=$('ct').value.trim();if(!t&&!att)return msg('⚠️ Chưa nhập nội dung');
- let stk=att&&att.id||'',pending=false;
- if(att&&att.data){const r=await fetch('/api/sticker/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'bình luận',by:$('nick').value,data:att.data,sq:true})}).then(r=>r.json()).catch(()=>({error:'Mất kết nối server'}));
-  if(!r.ok||!r.id)return msg('⚠️ '+(r.error||'Không gửi được ảnh'));stk=r.id;pending=!r.approved}
- post('/api/comment',{name:$('nick').value,text:t,stk},()=>{$('ct').value='';att=null;drawAtt();return pending?'✅ Đã gửi bình luận. Ảnh sẽ hiện lên sóng sau khi admin duyệt.':'✅ Đã gửi bình luận'})}
+$('cpool').onclick=e=>{const b=e.target.closest('button');if(b&&!atts.some(a=>a.id===b.dataset.c))addAtt({id:b.dataset.c})};
+const readF=f=>new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=()=>no('Không đọc được file');r.readAsDataURL(f)});
+const loadI=s=>new Promise((ok,no)=>{const im=new Image();im.onload=()=>ok(im);im.onerror=()=>no('Không đọc được ảnh');im.src=s});
+async function prepFile(f){const src=await readF(f);
+ if(f.type==='image/gif'){if(src.length>330000)throw 'GIF quá lớn (tối đa 250KB)';return src}
+ const im=await loadI(src),big=Math.max(im.naturalWidth,im.naturalHeight);
+ if(src.length<=330000&&big<=1024)return src;
+ let side=Math.min(big,640);
+ for(let i=0;i<6;i++){const k=side/big,c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.naturalWidth*k));c.height=Math.max(1,Math.round(im.naturalHeight*k));
+  c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+  for(const t of ['image/png','image/webp','image/jpeg']){const d=c.toDataURL(t,0.85);if(d.startsWith('data:'+t)&&d.length<=330000)return d}side=Math.round(side*0.75)}
+ throw 'Ảnh quá lớn, hãy chọn ảnh nhỏ hơn'}
+$('cfile').onchange=async e=>{const fs=[...e.target.files];e.target.value='';
+ for(const f of fs){if(atts.length>=MAXATT){msg('⚠️ Tối đa '+MAXATT+' ảnh trong một bình luận');break}
+  try{addAtt({data:await prepFile(f)})}catch(x){msg('⚠️ '+x)}}};
+async function comment(){const t=$('ct').value.trim();if(!t&&!atts.length)return msg('⚠️ Chưa nhập nội dung');
+ const custom=atts.filter(a=>a.data);let ids=[],pending=false;
+ if(custom.length){const r=await fetch('/api/sticker/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'bình luận',by:$('nick').value,items:custom.map(a=>a.data)})}).then(r=>r.json()).catch(()=>({error:'Mất kết nối server'}));
+  if(!r.ok||!r.ids||r.ids.length!==custom.length)return msg('⚠️ '+(r.error||'Không gửi được ảnh'));ids=r.ids;pending=!r.approved}
+ let k=0;const stks=atts.map(a=>a.id||ids[k++]);
+ post('/api/comment',{name:$('nick').value,text:t,stks},()=>{$('ct').value='';atts=[];drawAtt();return pending?'✅ Đã gửi bình luận. Ảnh sẽ hiện lên sóng sau khi admin duyệt.':'✅ Đã gửi bình luận'})}
 let stickers=[],pend=null;
 function drawStk(){drawCpool();drawFeed();$('stk').innerHTML=stickers.map(s=>`<button data-s="${esc(s.id)}" title="${esc(s.name)}"><img src="/sticker/${encodeURIComponent(s.id)}"></button>`).join('');$('stk0').style.display=stickers.length?'none':'block'}
 $('stk').onclick=e=>{const b=e.target.closest('button');if(b)post('/api/icon',{name:$('nick').value,kind:'sticker',sticker:b.dataset.s},()=>'✅ Sticker đã lên màn hình!')};

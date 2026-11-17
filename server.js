@@ -32,6 +32,8 @@ function imgDims(b,t){try{
   if(m>=0xC0&&m<=0xCF&&m!==0xC4&&m!==0xC8&&m!==0xCC)return[b[o+7]<<8|b[o+8],b[o+5]<<8|b[o+6]];
   if(m===0xD8||m===0x01||(m>=0xD0&&m<=0xD7)){o+=2;continue}o+=2+(b[o+2]<<8|b[o+3])}}
  }catch(e){}return null}
+const MAXATT=4;
+function attIds(b,ok){return [].concat(Array.isArray(b.stks)?b.stks:[],b.stk?[b.stk]:[]).map(x=>String(x).trim()).filter((x,i,a)=>/^[a-z0-9]{4,16}$/.test(x)&&a.indexOf(x)===i&&(!ok||ok(x))).slice(0,MAXATT)}
 function isImg(b,t){if(t==='png')return b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47;if(t==='jpeg')return b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF;if(t==='gif')return b.toString('latin1',0,4)==='GIF8';return b.toString('latin1',0,4)==='RIFF'&&b.toString('latin1',8,12)==='WEBP'}
 const clean=(x,n)=>String(x||'').replace(/[<>]/g,'').replace(/\s+/g,' ').trim().slice(0,n);
 const okKey=req=>KEY&&req.headers['x-key']===KEY;
@@ -49,7 +51,7 @@ const handler=async(req,res)=>{
   res.writeHead(200,{'Content-Type':f.mime,'Cache-Control':'public, max-age=86400'});return res.end(f.buf)}
  if(url==='/health')return json(res,200,{ok:true,keySet:!!KEY,synced:Date.now()-lastSync<15000});
  if(req.method!=='POST')return json(res,404,{error:'not found'});
- const b=await body(req,url==='/sync/push'?300000:(url==='/sync/sticker'||url==='/api/sticker/submit')?400000:20000);
+ const b=await body(req,url==='/sync/push'?300000:(url==='/sync/sticker')?400000:(url==='/api/sticker/submit')?1700000:20000);
  if(url==='/sync/push'){if(!okKey(req))return json(res,401,{error:'sai key'});lastSync=Date.now();
   if(Array.isArray(b.songs))songs=b.songs.filter(s=>s&&typeof s==='object').slice(0,300).map(s=>({code:String(s.code),name:String(s.name),artist:String(s.artist||''),votes:+s.votes||0}));
   if(Array.isArray(b.comments))comments=b.comments.slice(-100);
@@ -66,11 +68,14 @@ const handler=async(req,res)=>{
   s.votes++;enqueue({type:'vote',code:s.code,name:clean(b.name,14)||'Khách'});bcSongs();return json(res,200,{ok:true,name:s.name});
  }
  if(url==='/api/sticker/submit'){
-  const m=/^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+\/=]+)$/.exec(String(b.data||''));if(!m)return json(res,400,{error:'Ảnh không hợp lệ (png/jpg/webp/gif)'});
-  const buf=Buffer.from(m[2],'base64');if(buf.length>250000||buf.length<30||!isImg(buf,m[1]))return json(res,400,{error:'Ảnh không hợp lệ hoặc quá lớn (tối đa 250KB)'});
-  const w=limited('s',ip,30000);if(w)return json(res,429,{error:`Đợi ${w}s rồi gửi sticker tiếp`});
-  const id=Date.now().toString(36)+Math.random().toString(36).slice(2,5);if(b.sq){const d=imgDims(buf,m[1]);if(!d||d[0]!==d[1]||d[0]<16)return json(res,400,{error:'Ảnh phải vuông tỉ lệ 1:1'})}
-  enqueue({type:'stickerSubmit',name:clean(b.name,20)||'sticker',by:clean(b.by,14)||'Khách',data:b.data,sid:id,sq:!!b.sq});return json(res,200,{ok:true,id,approved:false})
+  const items=Array.isArray(b.items)?b.items:(b.data?[b.data]:[]);
+  if(!items.length||items.length>MAXATT)return json(res,400,{error:'Chọn từ 1 đến '+MAXATT+' ảnh'});
+  for(const it of items){const m=/^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+\/=]+)$/.exec(String(it||''));if(!m)return json(res,400,{error:'Ảnh không hợp lệ (png/jpg/webp/gif)'});
+   const buf=Buffer.from(m[2],'base64');if(buf.length>250000||buf.length<30||!isImg(buf,m[1]))return json(res,400,{error:'Ảnh không hợp lệ hoặc quá lớn (tối đa 250KB)'})}
+  const w=limited('s',ip,30000);if(w)return json(res,429,{error:`Đợi ${w}s rồi gửi ảnh tiếp`});
+  const ids=items.map((it,i)=>{const id=Date.now().toString(36)+Math.random().toString(36).slice(2,5)+i.toString(36);
+   enqueue({type:'stickerSubmit',name:clean(b.name,20)||'sticker',by:clean(b.by,14)||'Khách',data:it,sid:id,sq:!!b.sq});return id});
+  return json(res,200,{ok:true,id:ids[0],ids,approved:false})
  }
  if(url==='/api/icon'){
   const w=limited('i',ip,ICON_CD);if(w)return json(res,429,{error:`Đợi ${w}s rồi gửi icon tiếp`});
@@ -79,9 +84,9 @@ const handler=async(req,res)=>{
   enqueue({type:'icon',name:clean(b.name,14)||'Khách',kind});return json(res,200,{ok:true});
  }
  if(url==='/api/comment'){
-  const text=clean(b.text,120);const stk=/^[a-z0-9]{4,16}$/.test(String(b.stk||'').trim())?String(b.stk).trim():'';if(!text&&!stk)return json(res,400,{error:'Chưa nhập nội dung'});
+  const text=clean(b.text,120);const ids=attIds(b);if(!text&&!ids.length)return json(res,400,{error:'Chưa nhập nội dung'});
   const w=limited('c',ip,COMMENT_CD);if(w)return json(res,429,{error:`Đợi ${w}s rồi bình luận tiếp`});
-  const c={id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:clean(b.name,14)||'Khách',text,t:Date.now()};if(stk)c.stk=stk;
+  const c={id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:clean(b.name,14)||'Khách',text,t:Date.now()};if(ids.length)c.stks=ids;
   comments.push(c);if(comments.length>100)comments.shift();enqueue({type:'comment',c});send({type:'comment',c});return json(res,200,{ok:true});
  }
  json(res,404,{error:'not found'});
